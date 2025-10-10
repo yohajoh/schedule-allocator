@@ -14,11 +14,137 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id        Int      @id @default(autoincrement())
-  name      String
-  email     String   @unique
-  password  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// =========================================================
+// Prisma Schema for Hierarchical Course Registration
+// =========================================================
+
+// ---------------------------------------------------------
+// I. Access Control and Hierarchy
+// ---------------------------------------------------------
+
+model InstitutionUnit {
+  // PK: unit_id (Hierarchy Definition)
+  unit_id          Int     @id @default(autoincrement())
+  unit_code        String  @unique @db.VarChar(10)
+  unit_name        String  @db.VarChar(100)
+  unit_type        String  @db.VarChar(20) // e.g., 'Institution', 'College', 'Department'
+  
+  // FK: parent_unit_id (Recursive Self-Relationship)
+  parent_unit_id   Int?
+  parentUnit       InstitutionUnit? @relation("UnitHierarchy", fields: [parent_unit_id], references: [unit_id])
+  childUnits       InstitutionUnit[] @relation("UnitHierarchy")
+
+  // Relationships managed by this unit
+  rolesAssigned    UserRoleAssignment[]
+  coursesOffered   CourseCatalog[]
+  batchesAdministered StudentBatch[]
+}
+
+model SystemUser {
+  // PK: user_id (User Accounts)
+  user_id          Int     @id @default(autoincrement())
+  username         String  @unique @db.VarChar(50)
+  email            String  @unique @db.VarChar(100)
+  password_hash    String  @db.Char(64)
+  full_name        String  @db.VarChar(100)
+
+  // Relationship managed by this user
+  rolesAssigned    UserRoleAssignment[]
+}
+
+model UserRoleAssignment {
+  // PK: assignment_id (Access Control)
+  assignment_id    Int     @id @default(autoincrement())
+  
+  // FKs for the composite unique constraint
+  user_id          Int
+  unit_id          Int
+  
+  role_name        String  @db.VarChar(50) // e.g., 'System Admin', 'College Admin'
+
+  // Relations (M:1)
+  user             SystemUser        @relation(fields: [user_id], references: [user_id])
+  unit             InstitutionUnit   @relation(fields: [unit_id], references: [unit_id])
+
+  // UNIQUE constraint: A user has one role assignment per unit domain
+  @@unique([user_id, unit_id]) 
+}
+
+// ---------------------------------------------------------
+// II. Academic Course Catalog
+// ---------------------------------------------------------
+
+model CourseCatalog {
+  // PK: course_id (Master Course Definition)
+  course_id               Int      @id @default(autoincrement())
+  course_code             String   @unique @db.VarChar(10)
+  course_title            String   @db.VarChar(255)
+  credit_hours            Decimal  @db.Decimal(3, 2)
+  
+  has_lecture_component   Boolean
+  has_lab_component       Boolean
+  has_tutorial_component  Boolean
+
+  // FK: offering_dept_id (Ownership)
+  offering_dept_id        Int
+  offeringDepartment      InstitutionUnit @relation(fields: [offering_dept_id], references: [unit_id])
+
+  // Relationships (M:M via junction tables)
+  prereqTarget            CoursePrerequisite[] @relation("PrerequisiteTarget") // Courses that require this course
+  prereqRequired          CoursePrerequisite[] @relation("PrerequisiteRequired") // Courses that this course requires
+  curriculumMaps          CurriculumMandatoryMap[]
+}
+
+model CoursePrerequisite {
+  // PK: prereq_id (Dependency Rules - M:M junction)
+  prereq_id          Int @id @default(autoincrement())
+  
+  // FKs for the dependency relationship
+  target_course_id   Int
+  required_course_id Int
+
+  // Relations (M:1)
+  targetCourse       CourseCatalog @relation("PrerequisiteTarget", fields: [target_course_id], references: [course_id])
+  requiredCourse     CourseCatalog @relation("PrerequisiteRequired", fields: [required_course_id], references: [course_id])
+
+  // Ensures a dependency rule is defined only once
+  @@unique([target_course_id, required_course_id])
+}
+
+// ---------------------------------------------------------
+// III. Curriculum Planning (Departmental Course List Mapping)
+// ---------------------------------------------------------
+
+model StudentBatch {
+  // PK: batch_id (Batch Definition)
+  batch_id           Int     @id @default(autoincrement())
+  
+  // FK: program_dept_id (Requiring Department)
+  program_dept_id    Int
+  admissions_year    Int
+  batch_identifier   String  @unique @db.VarChar(50)
+
+  // Relations (M:1 and M:M)
+  programDepartment  InstitutionUnit @relation(fields: [program_dept_id], references: [unit_id])
+  curriculumMaps     CurriculumMandatoryMap[]
+}
+
+model CurriculumMandatoryMap {
+  // PK: map_id (The Department's Course List Blueprint - M:M junction)
+  map_id             Int @id @default(autoincrement())
+  
+  // FKs for the unique curriculum requirement
+  batch_id           Int
+  course_id          Int
+  
+  year_of_study      Int
+  semester_in_year   Int     // 1 or 2
+  requirement_type   String  @db.VarChar(20) // 'Mandatory' or 'Elective'
+
+  // Relations (M:1)
+  batch              StudentBatch    @relation(fields: [batch_id], references: [batch_id])
+  course             CourseCatalog   @relation(fields: [course_id], references: [course_id])
+
+  // UNIQUE constraint: Ensures a course is listed only once for a given batch in a specific term
+  @@unique([batch_id, course_id, year_of_study, semester_in_year])
 }
