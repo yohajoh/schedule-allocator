@@ -1,4 +1,5 @@
-import { PrismaClient } from "@/lib/generated/prisma/client"; //[BECAUSE NO OUTPUT] ==> IF OUTPUT THEN USE PATH
+
+import { PrismaClient } from "@/lib/generated/prisma"; //[BECAUSE NO OUTPUT] ==> IF OUTPUT THEN USE PATH
 const globalForPrisma = global as unknown as {
   prisma: PrismaClient;
 };
